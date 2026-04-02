@@ -1,0 +1,7 @@
+{
+  "name": "SafeGate AI",
+  "description": "A Guard Dashboard that verifies visitors by searching the resident's Gmail for delivery confirmations using Auth0 and Gmail API.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
