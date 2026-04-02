@@ -61,6 +61,17 @@ async function startServer() {
     res.json(resident);
   });
 
+  app.post('/api/gate/residents/:id/mock-verify', (req, res) => {
+    const { id } = req.params;
+    const resident = residents.find(r => r.id === id);
+    if (!resident) {
+      return res.status(404).json({ error: 'Resident not found' });
+    }
+    resident.isVerified = true;
+    delete resident.verificationToken;
+    res.json({ success: true, resident });
+  });
+
   app.get('/api/gate/verify-email/:token', (req, res) => {
     const resident = residents.find(r => r.verificationToken === req.params.token);
     if (!resident) {

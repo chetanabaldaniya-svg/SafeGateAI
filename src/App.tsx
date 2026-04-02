@@ -32,6 +32,7 @@ export default function App() {
   const [residentMessage, setResidentMessage] = useState<{type: 'success'|'error', text: string} | null>(null);
   const [showVerificationPrompt, setShowVerificationPrompt] = useState(true);
   const [selectedResident, setSelectedResident] = useState<{ id: string; flatNumber: string; email: string; isVerified: boolean; } | null>(null);
+  const [showAboutModal, setShowAboutModal] = useState(false);
   
   // Sorting state
   const [cibaSortOrder, setCibaSortOrder] = useState<'desc' | 'asc'>('desc');
@@ -445,8 +446,90 @@ export default function App() {
     }
   };
 
+  const handleMockVerify = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`/api/gate/residents/${id}/mock-verify`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        fetchLogs(); // Refresh residents list
+        if (selectedResident && selectedResident.id === id) {
+          setSelectedResident(prev => prev ? { ...prev, isVerified: true } : null);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to mock verify resident', err);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center py-12 px-4 sm:px-6 lg:px-8 font-sans">
+      {/* About Modal */}
+      {showAboutModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-slate-100 px-6 py-4 flex items-center justify-between z-10">
+              <h2 className="text-xl font-bold text-slate-900 flex items-center">
+                <ShieldCheck className="h-6 w-6 text-blue-600 mr-2" />
+                About SafeGate AI
+              </h2>
+              <button 
+                onClick={() => setShowAboutModal(false)}
+                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-6 text-slate-600">
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-5">
+                <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wider mb-2">Hackathon Submission</h3>
+                <p className="text-blue-800 font-medium">
+                  Built for the <a href="https://auth0-ai.devpost.com/" target="_blank" rel="noreferrer" className="underline hover:text-blue-600">Authorized to Act: Auth0 for AI Agents</a> hackathon on Devpost.
+                </p>
+              </div>
+
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900 mb-2">The Problem</h3>
+                <p>Security gates at residential complexes are a bottleneck. Guards manually verify every delivery driver, leading to long queues and frustrated residents. We need a way to automate this without compromising security.</p>
+              </div>
+
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900 mb-2">The Solution: AI + Auth0</h3>
+                <p className="mb-3">SafeGate AI uses an AI Agent to automatically vet incoming deliveries by scanning the resident's recent email confirmations (via Gmail API). If a match is found, the gate opens instantly.</p>
+                <p><strong>But what if the AI isn't sure?</strong></p>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-5">
+                <h3 className="text-lg font-semibold text-slate-900 mb-3 flex items-center">
+                  <UserCheck className="h-5 w-5 text-indigo-600 mr-2" />
+                  Authorized to Act (Auth0 CIBA)
+                </h3>
+                <p className="mb-4">
+                  When the AI Agent cannot confidently verify a delivery, it must be <strong>Authorized to Act</strong>. It uses <strong>Auth0 CIBA (Client-Initiated Backchannel Authentication)</strong> to send a secure push notification directly to the resident's mobile device.
+                </p>
+                <ul className="space-y-2 list-disc list-inside ml-2">
+                  <li>The AI Agent pauses the gate entry.</li>
+                  <li>Auth0 CIBA securely routes an approval request to the resident's authenticated device.</li>
+                  <li>The resident reviews the request and taps "Approve".</li>
+                  <li>The AI Agent receives the authorization token and opens the gate.</li>
+                </ul>
+              </div>
+            </div>
+            
+            <div className="bg-slate-50 px-6 py-4 border-t border-slate-100 flex justify-end">
+              <button 
+                onClick={() => setShowAboutModal(false)}
+                className="px-4 py-2 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Resident App Simulator (Floating Panel) */}
       <div className="fixed bottom-4 right-4 z-50 w-80 pointer-events-none">
         <div className="flex flex-col gap-3 pointer-events-auto">
@@ -504,16 +587,23 @@ export default function App() {
         </div>
       </div>
 
-      <div className="w-full max-w-md space-y-8">
-        <div className="text-center">
-          <div className="mx-auto h-16 w-16 bg-blue-600 rounded-full flex items-center justify-center shadow-lg">
-            <ShieldCheck className="h-8 w-8 text-white" />
+      <div className="w-full max-w-4xl">
+        <div className="text-center mb-10 relative">
+          <button 
+            onClick={() => setShowAboutModal(true)}
+            className="absolute right-0 top-0 text-sm font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-full transition-colors flex items-center"
+          >
+            <Info className="h-4 w-4 mr-1.5" />
+            Hackathon Info
+          </button>
+          <div className="flex justify-center items-center mb-4">
+            <div className="bg-blue-600 p-3 rounded-2xl shadow-lg shadow-blue-200">
+              <ShieldCheck className="h-10 w-10 text-white" />
+            </div>
           </div>
-          <h2 className="mt-6 text-3xl font-extrabold text-slate-900 tracking-tight">
-            SafeGate AI
-          </h2>
-          <p className="mt-2 text-sm text-slate-600">
-            Guard Dashboard - AI Vetting Module
+          <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight">SafeGate <span className="text-blue-600">AI</span></h1>
+          <p className="mt-3 text-lg text-slate-500 max-w-2xl mx-auto">
+            Intelligent security gate management powered by AI vetting and Auth0 CIBA authorization.
           </p>
         </div>
 
@@ -693,9 +783,17 @@ export default function App() {
                               <CheckCircle2 className="h-3 w-3 mr-1" /> Verified
                             </span>
                           ) : (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 mr-3">
-                              <Clock className="h-3 w-3 mr-1" /> Pending
-                            </span>
+                            <div className="flex items-center mr-3">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 mr-2">
+                                <Clock className="h-3 w-3 mr-1" /> Pending
+                              </span>
+                              <button
+                                onClick={(e) => handleMockVerify(r.id, e)}
+                                className="text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 px-2 py-1 rounded transition-colors font-medium"
+                              >
+                                Mock Verify
+                              </button>
+                            </div>
                           )}
                           <ChevronRight className="h-4 w-4 text-slate-400 group-hover:text-slate-600 transition-colors" />
                         </div>
