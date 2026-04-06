@@ -1453,9 +1453,17 @@ export default function App() {
                             <CheckCircle2 className="h-4 w-4 mr-1.5" /> Verified
                           </span>
                         ) : (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
-                            <Clock className="h-4 w-4 mr-1.5" /> Pending Verification
-                          </span>
+                          <div className="flex items-center space-x-2">
+                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                              <Clock className="h-4 w-4 mr-1.5" /> Pending Verification
+                            </span>
+                            <button
+                              onClick={(e) => handleMockVerify(selectedResident.id, e)}
+                              className="text-xs bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-blue-600 px-2.5 py-1 rounded-md transition-colors font-medium shadow-sm"
+                            >
+                              Mock Verify
+                            </button>
+                          </div>
                         )}
                       </div>
                       
