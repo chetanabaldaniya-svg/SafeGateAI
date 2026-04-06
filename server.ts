@@ -9,7 +9,7 @@ import fs from 'fs';
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT || 3000;
 
   app.use(express.json());
 
@@ -33,49 +33,59 @@ async function startServer() {
   });
 
   app.post('/api/gate/residents', async (req, res) => {
-    const { flatNumber, email } = req.body;
-    if (!flatNumber || !email) {
-      return res.status(400).json({ error: 'Flat number and email are required' });
-    }
+    try {
+      const { flatNumber, email } = req.body;
+      if (!flatNumber || !email) {
+        return res.status(400).json({ error: 'Flat number and email are required' });
+      }
 
-    let resident = residents.find(r => r.flatNumber === flatNumber);
-    const token = Math.random().toString(36).substring(2) + Date.now().toString(36);
-    
-    if (resident) {
-      resident.email = email;
-      resident.isVerified = false;
-      resident.verificationToken = token;
-    } else {
-      resident = { 
-        id: Math.random().toString(36).substring(7), 
-        flatNumber, 
-        email, 
-        isVerified: false, 
-        verificationToken: token 
-      };
-      residents.push(resident);
-    }
+      let resident = residents.find(r => r.flatNumber === flatNumber);
+      const token = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      
+      if (resident) {
+        resident.email = email;
+        resident.isVerified = false;
+        resident.verificationToken = token;
+      } else {
+        resident = { 
+          id: Math.random().toString(36).substring(7), 
+          flatNumber, 
+          email, 
+          isVerified: false, 
+          verificationToken: token 
+        };
+        residents.push(resident);
+      }
 
-    // Send verification email
-    await sendVerificationEmail(resident, req);
-    res.json(resident);
+      // Send verification email
+      await sendVerificationEmail(resident, req);
+      res.json(resident);
+    } catch (error) {
+      console.error('Error adding resident:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
   });
 
   app.post('/api/gate/residents/:id/resend-verification', async (req, res) => {
-    const { id } = req.params;
-    const resident = residents.find(r => r.id === id);
-    if (!resident) {
-      return res.status(404).json({ error: 'Resident not found' });
+    try {
+      const { id } = req.params;
+      const resident = residents.find(r => r.id === id);
+      if (!resident) {
+        return res.status(404).json({ error: 'Resident not found' });
+      }
+      if (resident.isVerified) {
+        return res.status(400).json({ error: 'Resident is already verified' });
+      }
+      
+      // Generate a new token just in case
+      resident.verificationToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      
+      await sendVerificationEmail(resident, req);
+      res.json({ success: true, message: 'Verification email sent' });
+    } catch (error) {
+      console.error('Error resending verification:', error);
+      res.status(500).json({ error: 'Internal server error' });
     }
-    if (resident.isVerified) {
-      return res.status(400).json({ error: 'Resident is already verified' });
-    }
-    
-    // Generate a new token just in case
-    resident.verificationToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
-    
-    await sendVerificationEmail(resident, req);
-    res.json({ success: true, message: 'Verification email sent' });
   });
 
   app.post('/api/gate/residents/:id/mock-verify', (req, res) => {
