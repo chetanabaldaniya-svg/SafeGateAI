@@ -15,7 +15,7 @@ async function startServer() {
 
   // API routes FIRST
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok' });
+    res.json({ status: 'ok', key: process.env.API_KEY ? 'exists' : 'missing' });
   });
 
   // In-memory store for Residents
@@ -59,6 +59,23 @@ async function startServer() {
     // Send verification email
     await sendVerificationEmail(resident, req);
     res.json(resident);
+  });
+
+  app.post('/api/gate/residents/:id/resend-verification', async (req, res) => {
+    const { id } = req.params;
+    const resident = residents.find(r => r.id === id);
+    if (!resident) {
+      return res.status(404).json({ error: 'Resident not found' });
+    }
+    if (resident.isVerified) {
+      return res.status(400).json({ error: 'Resident is already verified' });
+    }
+    
+    // Generate a new token just in case
+    resident.verificationToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
+    
+    await sendVerificationEmail(resident, req);
+    res.json({ success: true, message: 'Verification email sent' });
   });
 
   app.post('/api/gate/residents/:id/mock-verify', (req, res) => {
@@ -306,6 +323,7 @@ async function startServer() {
         log.status = Math.random() > 0.3 ? 'approved' : 'denied'; // 70% chance of approval
         log.resolvedAt = new Date().toISOString();
         console.log(`[Auth0 CIBA] Auto-simulated resident response for ${company} at flat ${flatNumber}: ${log.status}`);
+        broadcastNotification({ type: 'ciba_resolved', data: log });
       }
     }, 10000);
 
@@ -527,26 +545,38 @@ async function startServer() {
   app.get('/api/generate-arch', async (req, res) => {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateImages({
-        model: 'imagen-4.0-generate-001',
-        prompt: "A clean, modern, professional software architecture diagram for a security gate application. The diagram features interconnected nodes. On the left, a 'Frontend' node with a web browser and a security guard icon. In the center, a 'Backend' node with a server icon, database icon, and AI brain icon. On the right, a 'Resident' node with a mobile phone icon. At the top, 'External APIs' nodes with email and cloud security icons. Arrows connect the nodes showing data flow. Blue and slate color palette, technical blueprint style, high resolution, flat vector art style.",
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: {
+          parts: [
+            {
+              text: "A clean, modern, professional software architecture diagram for a security gate application. The diagram features interconnected nodes. On the left, a 'Frontend' node with a web browser and a security guard icon. In the center, a 'Backend' node with a server icon, database icon, and AI brain icon. On the right, a 'Resident' node with a mobile phone icon. At the top, 'External APIs' nodes with email and cloud security icons. Arrows connect the nodes showing data flow. Blue and slate color palette, technical blueprint style, high resolution, flat vector art style.",
+            },
+          ],
+        },
         config: {
-          numberOfImages: 1,
-          outputMimeType: 'image/jpeg',
-          aspectRatio: '16:9',
+          imageConfig: {
+            aspectRatio: "16:9",
+          },
         },
       });
 
-      if (response.generatedImages && response.generatedImages.length > 0) {
-        const base64EncodeString = response.generatedImages[0].image.imageBytes;
-        const publicDir = path.join(process.cwd(), 'public');
-        if (!fs.existsSync(publicDir)) {
-          fs.mkdirSync(publicDir, { recursive: true });
+      let foundImage = false;
+      for (const part of response.candidates?.[0]?.content?.parts || []) {
+        if (part.inlineData) {
+          const base64EncodeString = part.inlineData.data;
+          const publicDir = path.join(process.cwd(), 'public');
+          if (!fs.existsSync(publicDir)) {
+            fs.mkdirSync(publicDir, { recursive: true });
+          }
+          fs.writeFileSync(path.join(publicDir, 'architecture.jpg'), Buffer.from(base64EncodeString, 'base64'));
+          foundImage = true;
+          return res.json({ success: true, message: 'Image saved successfully.' });
         }
-        fs.writeFileSync(path.join(publicDir, 'architecture.jpg'), Buffer.from(base64EncodeString, 'base64'));
-        return res.json({ success: true, message: 'Image saved successfully.' });
       }
-      res.status(500).json({ error: 'No image data found in response.' });
+      if (!foundImage) {
+        res.status(500).json({ error: 'No image data found in response.' });
+      }
     } catch (error: any) {
       console.error('Error generating image:', error);
       res.status(500).json({ error: error.message });

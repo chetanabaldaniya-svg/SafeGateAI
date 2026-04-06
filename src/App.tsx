@@ -4,12 +4,13 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ShieldCheck, ShieldAlert, Loader2, UserCheck, Send, History, Clock, ThumbsUp, ThumbsDown, CheckCircle2, BarChart3, XCircle, Mail, MailCheck, MailWarning, Camera, X, Users, ArrowDown, ArrowUp, Bell, Smartphone, Search, QrCode, Home, Info, ChevronRight } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Loader2, UserCheck, Send, History, Clock, ThumbsUp, ThumbsDown, CheckCircle2, BarChart3, XCircle, Mail, MailCheck, MailWarning, Camera, X, Users, UserPlus, ArrowDown, ArrowUp, Bell, Smartphone, Search, QrCode, Home, Info, ChevronRight } from 'lucide-react';
 import jsQR from 'jsqr';
 import { QRCodeSVG } from 'qrcode.react';
 
 export default function App() {
-  const [mode, setMode] = useState<'delivery' | 'guest' | 'residents'>('delivery');
+  const [currentPage, setCurrentPage] = useState<'dashboard' | 'residents'>('dashboard');
+  const [mode, setMode] = useState<'delivery' | 'guest'>('delivery');
   const [company, setCompany] = useState('');
   const [visitorName, setVisitorName] = useState('');
   const [hostName, setHostName] = useState('');
@@ -23,6 +24,8 @@ export default function App() {
   const [logs, setLogs] = useState<{ id: string; flatNumber: string; company: string; timestamp: string; status: string; resolvedAt?: string; emailStatus?: string }[]>([]);
   const [guestLogs, setGuestLogs] = useState<{ id: string; flatNumber: string; visitorName: string; hostName?: string; purpose?: string; timestamp: string; status: string; }[]>([]);
   const [residents, setResidents] = useState<{ id: string; flatNumber: string; email: string; isVerified: boolean; }[]>([]);
+  const [residentSortBy, setResidentSortBy] = useState<'flat' | 'status'>('flat');
+  const [residentSortOrder, setResidentSortOrder] = useState<'asc' | 'desc'>('asc');
   const [stats, setStats] = useState<{ total: number; accuracy: number; tp: number; tn: number; fp: number; fn: number } | null>(null);
   
   // Resident Form State
@@ -33,6 +36,10 @@ export default function App() {
   const [showVerificationPrompt, setShowVerificationPrompt] = useState(true);
   const [selectedResident, setSelectedResident] = useState<{ id: string; flatNumber: string; email: string; isVerified: boolean; } | null>(null);
   const [showAboutModal, setShowAboutModal] = useState(false);
+  const [isGeneratingArch, setIsGeneratingArch] = useState(false);
+  const [archMessage, setArchMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
+  const [showGuestQRModal, setShowGuestQRModal] = useState(false);
+  const [guestQRData, setGuestQRData] = useState({ visitorName: '', flatNumber: '', hostName: '', purpose: '' });
   
   // Sorting state
   const [cibaSortOrder, setCibaSortOrder] = useState<'desc' | 'asc'>('desc');
@@ -47,7 +54,13 @@ export default function App() {
 
   // Camera state
   const [isCameraOpen, setIsCameraOpen] = useState(false);
-  const [isScanningQR, setIsScanningQR] = useState(false);
+  const [isScanningQR, setIsScanningQRState] = useState(false);
+  const isScanningQRRef = useRef(false);
+
+  const setIsScanningQR = (value: boolean) => {
+    isScanningQRRef.current = value;
+    setIsScanningQRState(value);
+  };
   const [photo, setPhoto] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -114,7 +127,7 @@ export default function App() {
         }
       }
     }
-    if (isScanningQR) {
+    if (isScanningQRRef.current) {
       requestRef.current = requestAnimationFrame(scanQR);
     }
   };
@@ -271,6 +284,13 @@ export default function App() {
           setNotifications(prev => prev.map(n => 
             n.logId === payload.data.id ? { ...n, status: payload.data.status } : n
           ));
+          setCibaStatus(prev => {
+            if (prev && prev.id === payload.data.id) {
+              return { ...prev, status: payload.data.status, resolvedAt: payload.data.resolvedAt };
+            }
+            return prev;
+          });
+          fetchLogs(); // Refresh logs to show the updated status
         }
       } catch (e) {
         console.error('WebSocket message parsing error:', e);
@@ -446,6 +466,51 @@ export default function App() {
     }
   };
 
+  const handleGenerateArch = async () => {
+    try {
+      // @ts-ignore
+      if (window.aistudio && !(await window.aistudio.hasSelectedApiKey())) {
+        // @ts-ignore
+        await window.aistudio.openSelectKey();
+      }
+      
+      setIsGeneratingArch(true);
+      setArchMessage(null);
+      
+      const res = await fetch('/api/generate-arch');
+      const data = await res.json();
+      
+      if (res.ok) {
+        setArchMessage({ type: 'success', text: 'Architecture diagram generated successfully! You can view it at /architecture.jpg' });
+      } else {
+        setArchMessage({ type: 'error', text: data.error || 'Failed to generate diagram' });
+      }
+    } catch (err: any) {
+      console.error(err);
+      setArchMessage({ type: 'error', text: err.message || 'An error occurred' });
+    } finally {
+      setIsGeneratingArch(false);
+    }
+  };
+
+  const handleResendVerification = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`/api/gate/residents/${id}/resend-verification`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        alert('Verification email sent successfully!');
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Failed to send verification email');
+      }
+    } catch (err) {
+      console.error('Failed to resend verification email', err);
+      alert('Network error occurred');
+    }
+  };
+
   const handleMockVerify = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
@@ -465,6 +530,91 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center py-12 px-4 sm:px-6 lg:px-8 font-sans">
+      {/* About Modal */}
+      {showGuestQRModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+            <div className="bg-indigo-50 border-b border-indigo-100 px-6 py-4 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-indigo-900 flex items-center">
+                <QrCode className="h-5 w-5 mr-2" />
+                Generate Guest Pass
+              </h2>
+              <button 
+                onClick={() => setShowGuestQRModal(false)}
+                className="p-1.5 text-indigo-400 hover:text-indigo-600 hover:bg-indigo-100 rounded-full transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Visitor Name</label>
+                <input
+                  type="text"
+                  value={guestQRData.visitorName}
+                  onChange={(e) => setGuestQRData({...guestQRData, visitorName: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                  placeholder="e.g. John Doe"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Flat Number</label>
+                <input
+                  type="text"
+                  value={guestQRData.flatNumber}
+                  onChange={(e) => setGuestQRData({...guestQRData, flatNumber: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                  placeholder="e.g. 101"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Host Name (Optional)</label>
+                <input
+                  type="text"
+                  value={guestQRData.hostName}
+                  onChange={(e) => setGuestQRData({...guestQRData, hostName: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                  placeholder="e.g. Jane Smith"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Purpose (Optional)</label>
+                <input
+                  type="text"
+                  value={guestQRData.purpose}
+                  onChange={(e) => setGuestQRData({...guestQRData, purpose: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                  placeholder="e.g. Dinner"
+                />
+              </div>
+              
+              {(guestQRData.visitorName && guestQRData.flatNumber) ? (
+                <div className="mt-6 flex flex-col items-center justify-center p-4 bg-slate-50 rounded-xl border border-slate-100">
+                  <div className="bg-white p-3 rounded-xl shadow-sm mb-3">
+                    <QRCodeSVG 
+                      value={JSON.stringify(guestQRData)} 
+                      size={180}
+                      level="M"
+                      includeMargin={true}
+                    />
+                  </div>
+                  <p className="text-xs text-slate-500 text-center">
+                    Scan this code at the gate for quick check-in.
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-6 p-4 bg-slate-50 rounded-xl border border-slate-100 text-center">
+                  <p className="text-sm text-slate-500">
+                    Enter visitor name and flat number to generate QR code.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* About Modal */}
       {showAboutModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
@@ -515,6 +665,45 @@ export default function App() {
                   <li>The resident reviews the request and taps "Approve".</li>
                   <li>The AI Agent receives the authorization token and opens the gate.</li>
                 </ul>
+              </div>
+
+              <div className="mt-8 pt-6 border-t border-slate-100">
+                <h3 className="text-sm font-bold text-slate-900 mb-3">Architecture Diagram</h3>
+                <p className="text-sm text-slate-600 mb-4">
+                  Generate a high-resolution software architecture diagram for SafeGate AI using Gemini.
+                </p>
+                <div className="flex flex-col space-y-3">
+                  <button
+                    onClick={handleGenerateArch}
+                    disabled={isGeneratingArch}
+                    className="flex justify-center items-center py-2 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isGeneratingArch ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Generating with Gemini...
+                      </>
+                    ) : (
+                      'Generate Architecture Diagram'
+                    )}
+                  </button>
+                  
+                  {archMessage && (
+                    <div className={`p-3 rounded-lg text-sm ${archMessage.type === 'success' ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'}`}>
+                      {archMessage.text}
+                      {archMessage.type === 'success' && (
+                        <div className="mt-2">
+                          <a href="/architecture.jpg" target="_blank" rel="noreferrer" className="text-green-700 underline font-medium">
+                            View Diagram
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
             
@@ -587,15 +776,37 @@ export default function App() {
         </div>
       </div>
 
-      <div className="w-full max-w-4xl">
-        <div className="text-center mb-10 relative">
+      <div className="w-full max-w-4xl mb-8">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-1.5 flex items-center justify-between">
+          <div className="flex space-x-1">
+            <button
+              onClick={() => setCurrentPage('dashboard')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center ${currentPage === 'dashboard' ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}
+            >
+              <ShieldCheck className="h-4 w-4 mr-2" />
+              Guard Dashboard
+            </button>
+            <button
+              onClick={() => setCurrentPage('residents')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center ${currentPage === 'residents' ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}
+            >
+              <Users className="h-4 w-4 mr-2" />
+              Resident Management
+            </button>
+          </div>
           <button 
             onClick={() => setShowAboutModal(true)}
-            className="absolute right-0 top-0 text-sm font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-full transition-colors flex items-center"
+            className="text-sm font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors flex items-center"
           >
             <Info className="h-4 w-4 mr-1.5" />
             Hackathon Info
           </button>
+        </div>
+      </div>
+
+      {currentPage === 'dashboard' ? (
+      <div className="w-full max-w-4xl">
+        <div className="text-center mb-10 relative">
           <div className="flex justify-center items-center mb-4">
             <div className="bg-blue-600 p-3 rounded-2xl shadow-lg shadow-blue-200">
               <ShieldCheck className="h-10 w-10 text-white" />
@@ -623,189 +834,21 @@ export default function App() {
             >
               Guest
             </button>
-            <button
-              type="button"
-              onClick={() => { setMode('residents'); setResult(null); setError(''); }}
-              className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors flex items-center justify-center ${mode === 'residents' ? 'bg-white text-slate-900 shadow' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-              <Home className="h-4 w-4 mr-1.5" />
-              Residents
-            </button>
           </div>
 
-          {mode === 'residents' ? (
-            <div className="space-y-6">
-              {selectedResident ? (
-                <div className="animate-in fade-in slide-in-from-right-4 duration-300">
-                  <div className="flex items-center mb-6">
-                    <button 
-                      onClick={() => setSelectedResident(null)}
-                      className="text-slate-500 hover:text-slate-900 transition-colors flex items-center text-sm font-medium"
-                    >
-                      <ArrowDown className="h-4 w-4 mr-1 rotate-90" />
-                      Back to Residents
-                    </button>
-                  </div>
-                  
-                  <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                    <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
-                      <div>
-                        <h3 className="text-lg font-semibold text-slate-900">Flat {selectedResident.flatNumber}</h3>
-                        <p className="text-sm text-slate-500">{selectedResident.email}</p>
-                      </div>
-                      {selectedResident.isVerified ? (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          <CheckCircle2 className="h-4 w-4 mr-1.5" /> Verified
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
-                          <Clock className="h-4 w-4 mr-1.5" /> Pending
-                        </span>
-                      )}
-                    </div>
-                    
-                    <div className="p-8 flex flex-col items-center justify-center">
-                      <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-4">
-                        <QRCodeSVG 
-                          value={JSON.stringify({ flatNumber: selectedResident.flatNumber, email: selectedResident.email })} 
-                          size={200}
-                          level="H"
-                          includeMargin={true}
-                        />
-                      </div>
-                      <h4 className="text-sm font-medium text-slate-900 mb-1">Resident QR Code</h4>
-                      <p className="text-xs text-slate-500 text-center max-w-xs">
-                        This QR code contains the resident's flat number and email address. It can be used for quick identification.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  {showVerificationPrompt && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 relative">
-                      <div className="flex">
-                        <div className="flex-shrink-0">
-                          <Info className="h-5 w-5 text-blue-400" />
-                        </div>
-                        <div className="ml-3">
-                          <h3 className="text-sm font-medium text-blue-800">Verification Required</h3>
-                          <div className="mt-2 text-sm text-blue-700">
-                            <p>Residents must verify their email address before they can approve or deny delivery requests.</p>
-                          </div>
-                        </div>
-                      </div>
-                      {residents.some(r => r.isVerified) && (
-                        <button
-                          type="button"
-                          onClick={() => setShowVerificationPrompt(false)}
-                          className="absolute top-2 right-2 p-1 bg-blue-50 text-blue-500 hover:bg-blue-100 rounded-md transition-colors"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  <form onSubmit={handleAddResident} className="space-y-4">
-                <div>
-                  <label htmlFor="residentFlat" className="block text-sm font-medium text-slate-700">
-                    Flat Number
-                  </label>
-                  <div className="mt-1">
-                    <input
-                      id="residentFlat"
-                      type="text"
-                      required
-                      value={residentFlat}
-                      onChange={(e) => setResidentFlat(e.target.value)}
-                      className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-lg shadow-sm placeholder-slate-400 focus:outline-none focus:ring-slate-500 focus:border-slate-500 sm:text-sm transition-colors"
-                      placeholder="e.g. 101"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label htmlFor="residentEmail" className="block text-sm font-medium text-slate-700">
-                    Resident Email
-                  </label>
-                  <div className="mt-1">
-                    <input
-                      id="residentEmail"
-                      type="email"
-                      required
-                      value={residentEmail}
-                      onChange={(e) => setResidentEmail(e.target.value)}
-                      className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-lg shadow-sm placeholder-slate-400 focus:outline-none focus:ring-slate-500 focus:border-slate-500 sm:text-sm transition-colors"
-                      placeholder="e.g. resident@example.com"
-                    />
-                  </div>
-                </div>
-                
-                {residentMessage && (
-                  <div className={`rounded-md p-3 border text-sm font-medium ${residentMessage.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
-                    {residentMessage.text}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={residentLoading}
-                  className="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-slate-800 hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-900 disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
-                >
-                  {residentLoading ? (
-                    <Loader2 className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" />
-                  ) : (
-                    <Mail className="h-5 w-5 mr-2" />
-                  )}
-                  Send Verification Link
-                </button>
-              </form>
-
-              <div className="pt-6 border-t border-slate-200">
-                <h4 className="text-sm font-medium text-slate-900 mb-3">Registered Residents</h4>
-                {residents.length === 0 ? (
-                  <p className="text-sm text-slate-500 italic">No residents registered yet.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {residents.map(r => (
-                      <li 
-                        key={r.id} 
-                        onClick={() => setSelectedResident(r)}
-                        className="flex items-center justify-between p-3 bg-slate-50 hover:bg-slate-100 cursor-pointer rounded-lg border border-slate-100 transition-colors group"
-                      >
-                        <div>
-                          <div className="text-sm font-medium text-slate-900">Flat {r.flatNumber}</div>
-                          <div className="text-xs text-slate-500">{r.email}</div>
-                        </div>
-                        <div className="flex items-center">
-                          {r.isVerified ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 mr-3">
-                              <CheckCircle2 className="h-3 w-3 mr-1" /> Verified
-                            </span>
-                          ) : (
-                            <div className="flex items-center mr-3">
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 mr-2">
-                                <Clock className="h-3 w-3 mr-1" /> Pending
-                              </span>
-                              <button
-                                onClick={(e) => handleMockVerify(r.id, e)}
-                                className="text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 px-2 py-1 rounded transition-colors font-medium"
-                              >
-                                Mock Verify
-                              </button>
-                            </div>
-                          )}
-                          <ChevronRight className="h-4 w-4 text-slate-400 group-hover:text-slate-600 transition-colors" />
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-              </>
-              )}
+          {mode === 'guest' && (
+            <div className="flex justify-end mb-4">
+              <button
+                type="button"
+                onClick={() => setShowGuestQRModal(true)}
+                className="text-sm font-medium text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors flex items-center"
+              >
+                <QrCode className="h-4 w-4 mr-1.5" />
+                Generate Guest Pass
+              </button>
             </div>
-          ) : (
+          )}
+
           <form className="space-y-6" onSubmit={handleCheckIn}>
             <div>
               <label htmlFor="flatNumber" className="block text-sm font-medium text-slate-700">
@@ -981,15 +1024,14 @@ export default function App() {
                 {loading ? (
                   <>
                     <Loader2 className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" />
-                    {mode === 'guest' ? 'Logging...' : 'Vetting...'}
+                    {mode === 'guest' ? 'Verifying...' : 'Vetting...'}
                   </>
                 ) : (
-                  mode === 'guest' ? 'Log Guest Entry' : 'Verify Visitor'
+                  mode === 'guest' ? 'Verify Guest' : 'Verify Delivery'
                 )}
               </button>
             </div>
           </form>
-          )}
 
           {mode !== 'residents' && result && (
             <div className={`mt-6 rounded-xl p-5 border ${mode === 'guest' ? 'bg-indigo-50 border-indigo-200' : (result.status === 'Verified' ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200')}`}>
@@ -1285,6 +1327,263 @@ export default function App() {
           <p>Powered by Auth0 & Gmail API</p>
         </div>
       </div>
+      ) : (
+        <div className="w-full max-w-5xl">
+          <div className="bg-white py-8 px-6 shadow-xl rounded-2xl sm:px-10 border border-slate-100">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h2 className="text-2xl font-bold text-slate-900">Resident Management</h2>
+                <p className="text-sm text-slate-500 mt-1">Add new residents and manage their verification status.</p>
+              </div>
+              <div className="bg-blue-50 p-2 rounded-lg">
+                <Users className="h-6 w-6 text-blue-600" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
+              {/* Left Column: Add Resident */}
+              <div className="md:col-span-5 space-y-6">
+                <div className="bg-slate-50 rounded-xl p-6 border border-slate-200">
+                  <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center">
+                    <UserPlus className="h-5 w-5 mr-2 text-slate-500" />
+                    Add New Resident
+                  </h3>
+                  
+                  {showVerificationPrompt && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 relative mb-6">
+                      <div className="flex">
+                        <div className="flex-shrink-0">
+                          <Info className="h-5 w-5 text-blue-400" />
+                        </div>
+                        <div className="ml-3">
+                          <h3 className="text-sm font-medium text-blue-800">Verification Required</h3>
+                          <div className="mt-2 text-sm text-blue-700">
+                            <p>Residents must verify their email address before they can approve or deny delivery requests.</p>
+                          </div>
+                        </div>
+                      </div>
+                      {residents.some(r => r.isVerified) && (
+                        <button
+                          type="button"
+                          onClick={() => setShowVerificationPrompt(false)}
+                          className="absolute top-2 right-2 p-1 bg-blue-50 text-blue-500 hover:bg-blue-100 rounded-md transition-colors"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleAddResident} className="space-y-4">
+                    <div>
+                      <label htmlFor="residentFlat" className="block text-sm font-medium text-slate-700">
+                        Flat Number
+                      </label>
+                      <div className="mt-1">
+                        <input
+                          id="residentFlat"
+                          type="text"
+                          required
+                          value={residentFlat}
+                          onChange={(e) => setResidentFlat(e.target.value)}
+                          className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-lg shadow-sm placeholder-slate-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors"
+                          placeholder="e.g. 101"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label htmlFor="residentEmail" className="block text-sm font-medium text-slate-700">
+                        Resident Email
+                      </label>
+                      <div className="mt-1">
+                        <input
+                          id="residentEmail"
+                          type="email"
+                          required
+                          value={residentEmail}
+                          onChange={(e) => setResidentEmail(e.target.value)}
+                          className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-lg shadow-sm placeholder-slate-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-colors"
+                          placeholder="e.g. resident@example.com"
+                        />
+                      </div>
+                    </div>
+                    
+                    {residentMessage && (
+                      <div className={`rounded-md p-3 border text-sm font-medium ${residentMessage.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                        {residentMessage.text}
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={residentLoading}
+                      className="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-70 disabled:cursor-not-allowed transition-colors mt-2"
+                    >
+                      {residentLoading ? (
+                        <Loader2 className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" />
+                      ) : (
+                        <Mail className="h-5 w-5 mr-2" />
+                      )}
+                      Send Verification Link
+                    </button>
+                  </form>
+                </div>
+              </div>
+
+              {/* Right Column: Resident List or Profile */}
+              <div className="md:col-span-7">
+                {selectedResident ? (
+                  <div className="animate-in fade-in slide-in-from-right-4 duration-300 h-full">
+                    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm h-full flex flex-col">
+                      <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+                        <div className="flex items-center">
+                          <button 
+                            onClick={() => setSelectedResident(null)}
+                            className="mr-3 text-slate-400 hover:text-slate-600 transition-colors bg-white p-1.5 rounded-md border border-slate-200 shadow-sm"
+                          >
+                            <ArrowDown className="h-4 w-4 rotate-90" />
+                          </button>
+                          <div>
+                            <h3 className="text-lg font-semibold text-slate-900">Flat {selectedResident.flatNumber}</h3>
+                            <p className="text-sm text-slate-500">{selectedResident.email}</p>
+                          </div>
+                        </div>
+                        {selectedResident.isVerified ? (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            <CheckCircle2 className="h-4 w-4 mr-1.5" /> Verified
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                            <Clock className="h-4 w-4 mr-1.5" /> Pending Verification
+                          </span>
+                        )}
+                      </div>
+                      
+                      <div className="p-8 flex flex-col items-center justify-center flex-grow">
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-6">
+                          <QRCodeSVG 
+                            value={JSON.stringify({ flatNumber: selectedResident.flatNumber, email: selectedResident.email })} 
+                            size={200}
+                            level="H"
+                            includeMargin={true}
+                          />
+                        </div>
+                        <h4 className="text-base font-medium text-slate-900 mb-2">Resident QR Code</h4>
+                        <p className="text-sm text-slate-500 text-center max-w-sm">
+                          This QR code contains the resident's flat number and email address. It can be used for quick identification at the gate.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-white border border-slate-200 rounded-xl shadow-sm h-full flex flex-col">
+                    <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 rounded-t-xl flex justify-between items-center">
+                      <h3 className="text-lg font-semibold text-slate-900 flex items-center">
+                        <Users className="h-5 w-5 mr-2 text-slate-500" />
+                        Registered Residents
+                        <span className="ml-2 bg-slate-200 text-slate-700 py-0.5 px-2 rounded-full text-xs font-medium">
+                          {residents.length}
+                        </span>
+                      </h3>
+                      
+                      {residents.length > 0 && (
+                        <div className="flex items-center space-x-2 text-sm">
+                          <span className="text-slate-500">Sort by:</span>
+                          <select 
+                            value={residentSortBy}
+                            onChange={(e) => setResidentSortBy(e.target.value as 'flat' | 'status')}
+                            className="bg-white border border-slate-300 text-slate-700 rounded-md py-1 px-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs"
+                          >
+                            <option value="flat">Flat Number</option>
+                            <option value="status">Verification Status</option>
+                          </select>
+                          <button
+                            onClick={() => setResidentSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                            className="p-1 bg-white border border-slate-300 text-slate-500 rounded-md hover:bg-slate-50 hover:text-blue-600 transition-colors"
+                            title={`Sort ${residentSortOrder === 'asc' ? 'Descending' : 'Ascending'}`}
+                          >
+                            <ArrowDown className={`h-4 w-4 transition-transform ${residentSortOrder === 'desc' ? 'rotate-180' : ''}`} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="p-0 flex-grow overflow-y-auto max-h-[600px]">
+                      {residents.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-64 text-center px-4">
+                          <div className="bg-slate-100 p-3 rounded-full mb-3">
+                            <Users className="h-8 w-8 text-slate-400" />
+                          </div>
+                          <p className="text-base font-medium text-slate-900 mb-1">No residents found</p>
+                          <p className="text-sm text-slate-500">Add a resident using the form to get started.</p>
+                        </div>
+                      ) : (
+                        <ul className="divide-y divide-slate-100">
+                          {[...residents].sort((a, b) => {
+                            let comparison = 0;
+                            if (residentSortBy === 'flat') {
+                              comparison = a.flatNumber.localeCompare(b.flatNumber, undefined, { numeric: true });
+                            } else if (residentSortBy === 'status') {
+                              // Verified first (true comes before false)
+                              comparison = (a.isVerified === b.isVerified) ? 0 : a.isVerified ? -1 : 1;
+                            }
+                            return residentSortOrder === 'asc' ? comparison : -comparison;
+                          }).map(r => (
+                            <li 
+                              key={r.id} 
+                              onClick={() => setSelectedResident(r)}
+                              className="flex items-center justify-between p-4 hover:bg-slate-50 cursor-pointer transition-colors group"
+                            >
+                              <div className="flex items-center">
+                                <div className="relative h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold mr-4">
+                                  {r.flatNumber.substring(0, 3)}
+                                  <span 
+                                    className={`absolute bottom-0 right-0 block h-3 w-3 rounded-full ring-2 ring-white ${r.isVerified ? 'bg-green-500' : 'bg-amber-400'}`} 
+                                    title={r.isVerified ? "Verified" : "Pending Verification"}
+                                  />
+                                </div>
+                                <div>
+                                  <div className="text-sm font-medium text-slate-900">Flat {r.flatNumber}</div>
+                                  <div className="text-xs text-slate-500">{r.email}</div>
+                                </div>
+                              </div>
+                              <div className="flex items-center">
+                                {r.isVerified ? (
+                                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 mr-4">
+                                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Verified
+                                  </span>
+                                ) : (
+                                  <div className="flex items-center mr-4">
+                                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 mr-2">
+                                      <Clock className="h-3.5 w-3.5 mr-1" /> Pending Verification
+                                    </span>
+                                    <button
+                                      onClick={(e) => handleResendVerification(r.id, e)}
+                                      className="text-xs bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-blue-600 px-2.5 py-1 rounded-md transition-colors font-medium shadow-sm mr-2"
+                                    >
+                                      Resend Email
+                                    </button>
+                                    <button
+                                      onClick={(e) => handleMockVerify(r.id, e)}
+                                      className="text-xs bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-blue-600 px-2.5 py-1 rounded-md transition-colors font-medium shadow-sm"
+                                    >
+                                      Mock Verify
+                                    </button>
+                                  </div>
+                                )}
+                                <ChevronRight className="h-5 w-5 text-slate-300 group-hover:text-blue-500 transition-colors" />
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>          </div>
+        </div>
+      )}
     </div>
   );
 }
